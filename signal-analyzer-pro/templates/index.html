@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📡 Signal Analyzer Pro</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header con Tabs -->
+        <div class="header">
+            <h1>📡 Signal Analyzer Pro</h1>
+            <div class="header-info">
+                <div class="status-badge" id="connectionStatus">
+                    <div class="status-dot"></div>
+                    <span>Conectando...</span>
+                </div>
+                <div class="status-badge">
+                    <span id="systemInfo">Sistema: --</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs de Navegación -->
+        <div class="tabs-container">
+            <button class="tab-btn active" onclick="switchTab('monitor')">
+                📊 Monitor en Tiempo Real
+            </button>
+            <button class="tab-btn" onclick="switchTab('map')">
+                🗺️ Mapa de Cobertura
+            </button>
+        </div>
+
+        <!-- TAB 1: Monitor en Tiempo Real -->
+        <div id="tab-monitor" class="tab-content active">
+            <div class="main-content">
+                <!-- Left Panel - WiFi -->
+                <div class="panel panel-left">
+                    <div class="card">
+                        <div class="card-title">📶 WiFi Monitor</div>
+                        
+                        <div class="rssi-display">
+                            <div class="rssi-value" id="wifiRssi">--</div>
+                            <div class="rssi-unit">dBm</div>
+                        </div>
+
+                        <div class="quality-bar">
+                            <div class="quality-fill" id="qualityFill" style="width: 0%"></div>
+                            <div class="quality-label" id="qualityLabel">Sin señal</div>
+                        </div>
+
+                        <div class="info-row">
+                            <span class="info-label">Red:</span>
+                            <span class="info-value" id="wifiSSID">N/A</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Canal:</span>
+                            <span class="info-value" id="wifiChannel">N/A</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Calidad:</span>
+                            <span class="info-value" id="wifiQuality">N/A</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Tiempo:</span>
+                            <span class="info-value" id="wifiTime">00:00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Mediciones:</span>
+                            <span class="info-value" id="wifiCount">0</span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">📈 Estadísticas WiFi</div>
+                        <div class="info-row">
+                            <span class="info-label">Promedio:</span>
+                            <span class="info-value" id="wifiAvg">-- dBm</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Máximo:</span>
+                            <span class="info-value" id="wifiMax">-- dBm</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Mínimo:</span>
+                            <span class="info-value" id="wifiMin">-- dBm</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Variación:</span>
+                            <span class="info-value" id="wifiVar">-- dBm</span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">🎛️ Controles WiFi</div>
+                        
+                        <div class="toggle-container">
+                            <div class="toggle" id="ultraFastToggle" onclick="toggleUltraFast()">
+                                <div class="toggle-thumb"></div>
+                            </div>
+                            <span>⚡ Modo Ultra-Rápido (0.1s)</span>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>Intervalo:</span>
+                                <span id="intervalValue">0.5s</span>
+                            </div>
+                            <input type="range" class="slider" id="intervalSlider" 
+                                   min="0.1" max="3" step="0.1" value="0.5">
+                        </div>
+
+                        <button class="btn btn-primary" id="wifiBtnStart" onclick="toggleWiFi()">
+                            ▶ Iniciar WiFi
+                        </button>
+                        <button class="btn btn-secondary" onclick="testWiFi()">
+                            🧪 Probar Conexión
+                        </button>
+                        <button class="btn btn-warning" onclick="addMarker()">
+                            🔖 Marcar Punto
+                        </button>
+                        <button class="btn btn-danger" onclick="clearWiFi()">
+                            🗑️ Limpiar Datos
+                        </button>
+                        <button class="btn btn-purple" onclick="exportWiFi()">
+                            💾 Exportar CSV
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Center Panel - Charts -->
+                <div class="panel panel-center">
+                    <div class="chart-container">
+                        <canvas id="wifiChart"></canvas>
+                    </div>
+                    
+                    <div class="chart-container">
+                        <canvas id="waveChart"></canvas>
+                    </div>
+                    
+                    <div class="chart-container">
+                        <canvas id="histChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Right Panel - Bluetooth -->
+                <div class="panel panel-right">
+                    <div class="card">
+                        <div class="card-title">🔵 Bluetooth Scanner</div>
+                        
+                        <div style="text-align: center; padding: 20px 0;">
+                            <div style="font-size: 3rem; margin-bottom: 10px;">📱</div>
+                            <div style="font-size: 1.5rem; font-weight: bold;" id="btCount">0</div>
+                            <div style="color: #8b92a7;">Dispositivos</div>
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>Intervalo:</span>
+                                <span id="btIntervalValue">2.0s</span>
+                            </div>
+                            <input type="range" class="slider" id="btIntervalSlider" 
+                                   min="1" max="10" step="0.5" value="2">
+                        </div>
+
+                        <button class="btn btn-purple" id="btBtnStart" onclick="toggleBluetooth()">
+                            ▶ Iniciar Escaneo
+                        </button>
+                        <button class="btn btn-danger" onclick="clearBluetooth()">
+                            🗑️ Limpiar Lista
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportBluetooth()">
+                            💾 Exportar CSV
+                        </button>
+                    </div>
+
+                    <div class="card" style="flex: 1; display: flex; flex-direction: column;">
+                        <div class="card-title">📱 Dispositivos Encontrados</div>
+                        <div class="device-list" id="deviceList">
+                            <div style="text-align: center; color: #8b92a7; padding: 20px;">
+                                Inicia el escaneo para ver dispositivos
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">ℹ️ Estado del Sistema</div>
+                        <div class="info-row">
+                            <span class="info-label">Conexión:</span>
+                            <span class="info-value" id="wsStatus">Desconectado</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Última Act.:</span>
+                            <span class="info-value" id="lastUpdate">--</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">WiFi Status:</span>
+                            <span class="info-value" id="wifiStatus">Detenido</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">BT Status:</span>
+                            <span class="info-value" id="btStatus">Detenido</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: Mapa de Cobertura -->
+        <div id="tab-map" class="tab-content">
+            <div class="map-layout">
+                <!-- Panel de herramientas -->
+                <div class="map-toolbar">
+                    <div class="card">
+                        <div class="card-title">🛠️ Herramientas</div>
+                        
+                        <div class="tool-section">
+                            <label>Modo:</label>
+                            <select id="mapMode" class="map-select" onchange="changeMapMode()">
+                                <option value="point">📍 Marcar Punto</option>
+                                <option value="wall">🧱 Agregar Pared</option>
+                                <option value="router">📡 Ubicar Router</option>
+                            </select>
+                        </div>
+
+                        <div class="tool-section">
+                            <label>Visualización:</label>
+                            <select id="mapView" class="map-select" onchange="changeMapView()">
+                                <option value="2d">🗺️ Mapa 2D</option>
+                                <option value="heatmap">🌡️ Mapa de Calor</option>
+                                <option value="3d">🎮 Vista 3D</option>
+                            </select>
+                        </div>
+
+                        <div class="tool-section">
+                            <button class="btn btn-primary" onclick="startMapMonitoring()">
+                                📍 Iniciar Mapeo
+                            </button>
+                            <button class="btn btn-secondary" onclick="addManualPoint()">
+                                ➕ Punto Manual
+                            </button>
+                            <button class="btn btn-warning" onclick="toggleGrid()">
+                                📏 Grid
+                            </button>
+                            <button class="btn btn-danger" onclick="clearMap()">
+                                🗑️ Limpiar Mapa
+                            </button>
+                            <button class="btn btn-purple" onclick="exportMap()">
+                                💾 Exportar Mapa
+                            </button>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title">📊 Estadísticas del Mapa</div>
+                            <div class="info-row">
+                                <span class="info-label">Puntos:</span>
+                                <span class="info-value" id="mapPoints">0</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Área cubierta:</span>
+                                <span class="info-value" id="mapArea">0 m²</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">RSSI Promedio:</span>
+                                <span class="info-value" id="mapAvgRssi">-- dBm</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Zona mejor señal:</span>
+                                <span class="info-value" id="mapBestZone">--</span>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-title">🎨 Leyenda</div>
+                            <div class="legend-item">
+                                <div class="legend-color" style="background: #51cf66;"></div>
+                                <span>Excelente (-30 a -67 dBm)</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color" style="background: #ffd43b;"></div>
+                                <span>Buena (-67 a -80 dBm)</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color" style="background: #ff9f43;"></div>
+                                <span>Regular (-80 a -90 dBm)</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color" style="background: #ff6b6b;"></div>
+                                <span>Débil (< -90 dBm)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Canvas del mapa -->
+                <div class="map-canvas-container">
+                    <div class="map-info-overlay">
+                        <span id="mapModeLabel">📍 Modo: Marcar Puntos</span>
+                        <span id="mapCoords">X: 0, Y: 0</span>
+                    </div>
+                    <canvas id="mapCanvas" width="1200" height="800"></canvas>
+                    <div id="map3dContainer" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <div class="stats-bar">
+                <div class="stat-item">
+                    <span class="stat-label">Datos WiFi</span>
+                    <span class="stat-value" id="totalWifiData">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Dispositivos BT</span>
+                    <span class="stat-value" id="totalBtDevices">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Puntos Mapa</span>
+                    <span class="stat-value" id="totalMapPoints">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Sesión</span>
+                    <span class="stat-value" id="sessionTime">00:00</span>
+                </div>
+            </div>
+            <div style="color: #8b92a7; font-size: 0.9rem;">
+                Signal Analyzer Pro v2.0 - Real-Time Edition | Con Mapeo de Cobertura
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/map.js"></script>
+</body>
+</html>
