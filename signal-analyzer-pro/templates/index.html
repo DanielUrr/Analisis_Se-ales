@@ -7,6 +7,7 @@
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -36,9 +37,11 @@
         </div>
 
         <!-- TAB 1: Monitor en Tiempo Real -->
+        <!-- TAB 1: Monitor en Tiempo Real -->
         <div id="tab-monitor" class="tab-content active">
-            <div class="main-content">
-                <!-- Left Panel - WiFi -->
+            <div class="main-content-extended">
+                
+                <!-- Panel Izquierdo - WiFi CON Herramientas Avanzadas -->
                 <div class="panel panel-left">
                     <div class="card">
                         <div class="card-title">📶 WiFi Monitor</div>
@@ -130,9 +133,74 @@
                             💾 Exportar CSV
                         </button>
                     </div>
+
+                    <!-- NUEVO: Herramientas Avanzadas -->
+                    <div class="card">
+                        <div class="card-title">🔧 Herramientas Avanzadas</div>
+                        <button class="btn btn-secondary" onclick="scanAllNetworks()">
+                            📡 Escanear Redes
+                        </button>
+                        <button class="btn btn-secondary" onclick="analyzeChannel()">
+                            📊 Analizar Canal
+                        </button>
+                        <button class="btn btn-purple" onclick="exportToJSON()">
+                            💾 Exportar JSON
+                        </button>
+                        <button class="btn btn-purple" onclick="exportToCSV()">
+                            📄 Exportar CSV
+                        </button>
+                    </div>
                 </div>
 
-                <!-- Center Panel - Charts -->
+                <!-- Panel Central-Izquierdo - Bluetooth NUEVO -->
+                <div class="panel panel-bluetooth">
+                    <div class="card">
+                        <div class="card-title">🔵 Bluetooth Scanner</div>
+                        <div class="rssi-display">
+                            <div class="rssi-value" id="btCount">0</div>
+                            <div class="rssi-unit">Dispositivos</div>
+                        </div>
+                        
+                        <div class="slider-container">
+                            <div class="slider-label">
+                                <span>Intervalo:</span>
+                                <span id="btIntervalValue">2.0s</span>
+                            </div>
+                            <input type="range" class="slider" id="btIntervalSlider" 
+                                   min="1" max="10" step="0.5" value="2">
+                        </div>
+                        
+                        <button class="btn btn-purple" id="btBtnStart" onclick="toggleBluetooth()">
+                            🔵 Iniciar Escaneo
+                        </button>
+                        <button class="btn btn-danger" onclick="clearBluetooth()">
+                            🗑️ Limpiar Lista
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportBluetooth()">
+                            💾 Exportar CSV
+                        </button>
+                    </div>
+
+                    <!-- Gráficas de Bluetooth -->
+                    <div class="card">
+                        <div class="card-title">📊 Estadísticas Bluetooth</div>
+                        <div class="chart-container-small">
+                            <canvas id="btChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Lista de Dispositivos -->
+                    <div class="card" style="flex: 1; display: flex; flex-direction: column;">
+                        <div class="card-title">📱 Dispositivos Encontrados</div>
+                        <div class="device-list" id="deviceList">
+                            <div style="text-align: center; color: #8b92a7; padding: 20px;">
+                                Inicia el escaneo para ver dispositivos
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel Central-Derecho - Charts WiFi -->
                 <div class="panel panel-center">
                     <div class="chart-container">
                         <canvas id="wifiChart"></canvas>
@@ -147,46 +215,8 @@
                     </div>
                 </div>
 
-                <!-- Right Panel - Bluetooth -->
+                <!-- Panel Derecho - Sistema -->
                 <div class="panel panel-right">
-                    <div class="card">
-                        <div class="card-title">🔵 Bluetooth Scanner</div>
-                        
-                        <div style="text-align: center; padding: 20px 0;">
-                            <div style="font-size: 3rem; margin-bottom: 10px;">📱</div>
-                            <div style="font-size: 1.5rem; font-weight: bold;" id="btCount">0</div>
-                            <div style="color: #8b92a7;">Dispositivos</div>
-                        </div>
-
-                        <div class="slider-container">
-                            <div class="slider-label">
-                                <span>Intervalo:</span>
-                                <span id="btIntervalValue">2.0s</span>
-                            </div>
-                            <input type="range" class="slider" id="btIntervalSlider" 
-                                   min="1" max="10" step="0.5" value="2">
-                        </div>
-
-                        <button class="btn btn-purple" id="btBtnStart" onclick="toggleBluetooth()">
-                            ▶ Iniciar Escaneo
-                        </button>
-                        <button class="btn btn-danger" onclick="clearBluetooth()">
-                            🗑️ Limpiar Lista
-                        </button>
-                        <button class="btn btn-secondary" onclick="exportBluetooth()">
-                            💾 Exportar CSV
-                        </button>
-                    </div>
-
-                    <div class="card" style="flex: 1; display: flex; flex-direction: column;">
-                        <div class="card-title">📱 Dispositivos Encontrados</div>
-                        <div class="device-list" id="deviceList">
-                            <div style="text-align: center; color: #8b92a7; padding: 20px;">
-                                Inicia el escaneo para ver dispositivos
-                            </div>
-                        </div>
-                    </div>
-
                     <div class="card">
                         <div class="card-title">ℹ️ Estado del Sistema</div>
                         <div class="info-row">
@@ -210,103 +240,195 @@
             </div>
         </div>
 
+
         <!-- TAB 2: Mapa de Cobertura -->
-        <div id="tab-map" class="tab-content">
-            <div class="map-layout">
-                <!-- Panel de herramientas -->
-                <div class="map-toolbar">
-                    <div class="card">
-                        <div class="card-title">🛠️ Herramientas</div>
-                        
-                        <div class="tool-section">
-                            <label>Modo:</label>
-                            <select id="mapMode" class="map-select" onchange="changeMapMode()">
-                                <option value="point">📍 Marcar Punto</option>
-                                <option value="wall">🧱 Agregar Pared</option>
-                                <option value="router">📡 Ubicar Router</option>
-                            </select>
-                        </div>
+        <!-- TAB 2 Mapa de Cobertura - VERSIÓN MEJORADA -->
+<div id="tab-map" class="tab-content">
+    <div class="map-layout-new">
+        
+        <!-- Panel Izquierdo: Controles -->
+        <div class="map-sidebar">
+            
+            <!-- Sección: Modo de Operación -->
+            <div class="card map-card">
+                <div class="card-title">🎯 Modo de Operación</div>
+                <div class="map-mode-grid">
+                    <button class="mode-btn active" data-mode="point" onclick="selectMapMode('point')">
+                        <div class="mode-icon">📍</div>
+                        <div class="mode-name">Marcar Punto</div>
+                        <div class="mode-desc">Registrar señal WiFi</div>
+                    </button>
+                    <button class="mode-btn" data-mode="router" onclick="selectMapMode('router')">
+                        <div class="mode-icon">📡</div>
+                        <div class="mode-name">Ubicar Router</div>
+                        <div class="mode-desc">Posición del AP</div>
+                    </button>
+                    <button class="mode-btn" data-mode="wall" onclick="selectMapMode('wall')">
+                        <div class="mode-icon">🧱</div>
+                        <div class="mode-name">Agregar Pared</div>
+                        <div class="mode-desc">2 clics para crear</div>
+                    </button>
+                </div>
+            </div>
 
-                        <div class="tool-section">
-                            <label>Visualización:</label>
-                            <select id="mapView" class="map-select" onchange="changeMapView()">
-                                <option value="2d">🗺️ Mapa 2D</option>
-                                <option value="heatmap">🌡️ Mapa de Calor</option>
-                                <option value="3d">🎮 Vista 3D</option>
-                            </select>
-                        </div>
+            <!-- Sección: Visualización -->
+            <div class="card map-card">
+                <div class="card-title">👁️ Visualización</div>
+                <div class="view-tabs">
+                    <button class="view-tab active" data-view="2d" onclick="selectMapView('2d')">
+                        <span class="view-icon">🗺️</span>
+                        Mapa 2D
+                    </button>
+                    <button class="view-tab" data-view="heatmap" onclick="selectMapView('heatmap')">
+                        <span class="view-icon">🔥</span>
+                        Mapa de Calor
+                    </button>
+                    <button class="view-tab" data-view="3d" onclick="selectMapView('3d')">
+                        <span class="view-icon">📦</span>
+                        Vista 3D
+                    </button>
+                </div>
+            </div>
 
-                        <div class="tool-section">
-                            <button class="btn btn-primary" onclick="startMapMonitoring()">
-                                📍 Iniciar Mapeo
-                            </button>
-                            <button class="btn btn-secondary" onclick="addManualPoint()">
-                                ➕ Punto Manual
-                            </button>
-                            <button class="btn btn-warning" onclick="toggleGrid()">
-                                📏 Grid
-                            </button>
-                            <button class="btn btn-danger" onclick="clearMap()">
-                                🗑️ Limpiar Mapa
-                            </button>
-                            <button class="btn btn-purple" onclick="exportMap()">
-                                💾 Exportar Mapa
-                            </button>
-                        </div>
+            <!-- Sección: Acciones Rápidas -->
+            <div class="card map-card">
+                <div class="card-title">⚡ Acciones Rápidas</div>
+                <div class="action-buttons">
+                    <button class="btn btn-success" onclick="startMapMonitoring()">
+                        <span id="mapMonitorIcon">▶️</span> Iniciar Mapeo
+                    </button>
+                    <button class="btn btn-secondary" onclick="addManualPoint()">
+                        ➕ Punto Manual
+                    </button>
+                    <button class="btn btn-warning" onclick="toggleGrid()">
+                        <span id="gridIcon">✅</span> Grid
+                    </button>
+                    <button class="btn btn-purple" onclick="exportMap()">
+                        💾 Exportar Mapa
+                    </button>
+                    <button class="btn btn-danger" onclick="clearMap()">
+                        🗑️ Limpiar Todo
+                    </button>
+                </div>
+            </div>
 
-                        <div class="card">
-                            <div class="card-title">📊 Estadísticas del Mapa</div>
-                            <div class="info-row">
-                                <span class="info-label">Puntos:</span>
-                                <span class="info-value" id="mapPoints">0</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Área cubierta:</span>
-                                <span class="info-value" id="mapArea">0 m²</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">RSSI Promedio:</span>
-                                <span class="info-value" id="mapAvgRssi">-- dBm</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Zona mejor señal:</span>
-                                <span class="info-value" id="mapBestZone">--</span>
-                            </div>
-                        </div>
+            <!-- Sección: Estadísticas -->
+            <div class="card map-card">
+                <div class="card-title">📊 Estadísticas del Mapa</div>
+                <div class="map-stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-icon">📍</div>
+                        <div class="stat-value" id="mapPoints">0</div>
+                        <div class="stat-label">Puntos</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-icon">📏</div>
+                        <div class="stat-value" id="mapArea">0</div>
+                        <div class="stat-label">Área (m²)</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-icon">📡</div>
+                        <div class="stat-value" id="mapAvgRssi">--</div>
+                        <div class="stat-label">RSSI Promedio</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-icon">⭐</div>
+                        <div class="stat-value" id="mapBestZone">--</div>
+                        <div class="stat-label">Mejor Zona</div>
+                    </div>
+                </div>
+            </div>
 
-                        <div class="card">
-                            <div class="card-title">🎨 Leyenda</div>
-                            <div class="legend-item">
-                                <div class="legend-color" style="background: #51cf66;"></div>
-                                <span>Excelente (-30 a -67 dBm)</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-color" style="background: #ffd43b;"></div>
-                                <span>Buena (-67 a -80 dBm)</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-color" style="background: #ff9f43;"></div>
-                                <span>Regular (-80 a -90 dBm)</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-color" style="background: #ff6b6b;"></div>
-                                <span>Débil (< -90 dBm)</span>
-                            </div>
+            <!-- Sección: Leyenda -->
+            <div class="card map-card">
+                <div class="card-title">🎨 Leyenda de Señal</div>
+                <div class="legend-list">
+                    <div class="legend-item-new">
+                        <div class="legend-bar excellent"></div>
+                        <div class="legend-info">
+                            <span class="legend-title">Excelente</span>
+                            <span class="legend-range">-30 a -67 dBm</span>
                         </div>
+                    </div>
+                    <div class="legend-item-new">
+                        <div class="legend-bar good"></div>
+                        <div class="legend-info">
+                            <span class="legend-title">Buena</span>
+                            <span class="legend-range">-67 a -80 dBm</span>
+                        </div>
+                    </div>
+                    <div class="legend-item-new">
+                        <div class="legend-bar regular"></div>
+                        <div class="legend-info">
+                            <span class="legend-title">Regular</span>
+                            <span class="legend-range">-80 a -90 dBm</span>
+                        </div>
+                    </div>
+                    <div class="legend-item-new">
+                        <div class="legend-bar weak"></div>
+                        <div class="legend-info">
+                            <span class="legend-title">Débil</span>
+                            <span class="legend-range">&lt; -90 dBm</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Panel Central: Canvas del Mapa -->
+        <div class="map-main-area">
+            <div class="map-canvas-wrapper">
+                <!-- Barra de información superior -->
+                <div class="map-info-bar">
+                    <div class="map-info-item">
+                        <span class="info-badge" id="currentMode">📍 Modo: Marcar Punto</span>
+                    </div>
+                    <div class="map-info-item">
+                        <span class="info-coords" id="mapCoords">X: 0m, Y: 0m</span>
+                    </div>
+                    <div class="map-info-item">
+                        <span class="info-badge" id="mapStatus">⏸️ Mapeo Detenido</span>
                     </div>
                 </div>
 
                 <!-- Canvas del mapa -->
-                <div class="map-canvas-container">
-                    <div class="map-info-overlay">
-                        <span id="mapModeLabel">📍 Modo: Marcar Puntos</span>
-                        <span id="mapCoords">X: 0, Y: 0</span>
-                    </div>
+                <div class="canvas-container">
                     <canvas id="mapCanvas" width="1200" height="800"></canvas>
                     <div id="map3dContainer" style="display: none;"></div>
                 </div>
+
+                <!-- Controles flotantes en el canvas -->
+                <div class="canvas-controls">
+                    <button class="canvas-btn" onclick="zoomIn()" title="Acercar">
+                        <span>🔍+</span>
+                    </button>
+                    <button class="canvas-btn" onclick="zoomOut()" title="Alejar">
+                        <span>🔍-</span>
+                    </button>
+                    <button class="canvas-btn" onclick="resetView()" title="Restablecer vista">
+                        <span>🔄</span>
+                    </button>
+                    <button class="canvas-btn" onclick="fullscreenMap()" title="Pantalla completa">
+                        <span>⛶</span>
+                    </button>
+                </div>
+
+                <!-- Ayuda flotante -->
+                <div class="map-help-tooltip">
+                    <div class="help-header">💡 Ayuda Rápida</div>
+                    <ul>
+                        <li><strong>Marcar Punto:</strong> Clic para agregar medición WiFi</li>
+                        <li><strong>Ubicar Router:</strong> Clic para colocar router</li>
+                        <li><strong>Agregar Pared:</strong> 2 clics para trazar pared</li>
+                        <li><strong>Vista:</strong> Cambia entre 2D, Heatmap y 3D</li>
+                    </ul>
+                </div>
             </div>
         </div>
+
+    </div>
+</div>
 
         <!-- Footer -->
         <div class="footer">
@@ -336,5 +458,6 @@
 
     <script src="/static/app.js"></script>
     <script src="/static/map.js"></script>
+
 </body>
 </html>

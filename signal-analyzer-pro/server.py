@@ -1,9 +1,8 @@
 """
-Signal Analyzer Pro - Backend Server
-Servidor Flask con WebSockets para monitoreo en tiempo real
+Signal Analyzer Pro - Backend Server MEJORADO v2.0
+Servidor Flask con WebSockets optimizado y nuevas características
 """
-
-from flask import Flask, render_template, send_from_directory
+from flask import Flask, render_template, send_from_directory, jsonify, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import subprocess
@@ -13,13 +12,17 @@ import threading
 import time
 from datetime import datetime
 import json
+import psutil
+from collections import deque
+import statistics
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['SECRET_KEY'] = 'signal_analyzer_secret_key_2024'
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# DESPUÉS - Modo threading (NO requiere eventlet):
+socketio = SocketIO(app, cors_allowed_origins="*", ping_timeout=60, ping_interval=25)
 
-# Variables globales
+# Variables globales mejoradas
 wifi_monitoring = False
 bt_monitoring = False
 wifi_thread = None
@@ -27,12 +30,188 @@ bt_thread = None
 sistema = platform.system()
 encoding_cache = None
 
+# Historiales mejorados con límite
+wifi_history = deque(maxlen=1000)  # Últimas 1000 mediciones
+bt_history = deque(maxlen=500)
+network_stats = {
+    'packets_sent': 0,
+    'packets_received': 0,
+    'errors': 0,
+    'drops': 0
+}
+
 class SignalMonitor:
     def __init__(self):
         self.sistema = platform.system()
         self.encoding_cache = None
+        self.last_wifi_data = None
+        self.wifi_errors = 0
+        
+    # ===== NUEVAS FUNCIONALIDADES =====
     
-    # ===== WiFi Methods =====
+    def get_network_interfaces(self):
+        """Obtiene lista de interfaces de red disponibles"""
+        try:
+            interfaces = []
+            if self.sistema == "Windows":
+                result = subprocess.check_output(
+                    ['netsh', 'interface', 'show', 'interface'],
+                    encoding='utf-8',
+                    stderr=subprocess.DEVNULL,
+                    timeout=2
+                )
+                for line in result.split('\n'):
+                    if 'Connected' in line or 'Conectado' in line:
+                        parts = line.split()
+                        if len(parts) >= 4:
+                            interfaces.append(' '.join(parts[3:]))
+            elif self.sistema == "Linux":
+                result = subprocess.check_output(['ip', 'link', 'show'],
+                    encoding='utf-8',
+                    stderr=subprocess.DEVNULL,
+                    timeout=2
+                )
+                for line in result.split('\n'):
+                    match = re.search(r'\d+: (\w+):', line)
+                    if match and 'lo' not in match.group(1):
+                        interfaces.append(match.group(1))
+            return interfaces
+        except Exception as e:
+            print(f"Error obteniendo interfaces: {e}")
+            return []
+    
+    def get_channel_info(self):
+        """Obtiene información detallada del canal WiFi"""
+        try:
+            if self.sistema == "Windows":
+                result = subprocess.check_output(
+                    ['netsh', 'wlan', 'show', 'interfaces'],
+                    encoding=self.encoding_cache or 'utf-8',
+                    stderr=subprocess.DEVNULL,
+                    timeout=1
+                )
+                channel = None
+                band = None
+                frequency = None
+                
+                for line in result.split('\n'):
+                    line = line.strip()
+                    if 'Canal' in line or 'Channel' in line:
+                        try:
+                            channel = int(re.search(r'\d+', line.split(':')[1]).group())
+                        except:
+                            pass
+                    if 'Radio type' in line or 'Tipo de radio' in line:
+                        band = line.split(':')[1].strip()
+                    if 'Frequency' in line or 'Frecuencia' in line:
+                        try:
+                            frequency = float(re.search(r'[\d.]+', line.split(':')[1]).group())
+                        except:
+                            pass
+                
+                return {
+                    'channel': channel,
+                    'band': band,
+                    'frequency': frequency,
+                    'width': self._get_channel_width(channel)
+                }
+        except Exception as e:
+            print(f"Error obteniendo info de canal: {e}")
+            return None
+    
+    def _get_channel_width(self, channel):
+        """Determina el ancho de banda del canal"""
+        if channel:
+            if channel <= 14:
+                return '2.4 GHz'
+            else:
+                return '5 GHz'
+        return 'Unknown'
+    
+    def scan_wifi_networks(self):
+        """Escanea todas las redes WiFi disponibles"""
+        try:
+            networks = []
+            if self.sistema == "Windows":
+                result = subprocess.check_output(
+                    ['netsh', 'wlan', 'show', 'networks', 'mode=bssid'],
+                    encoding=self.encoding_cache or 'utf-8',
+                    stderr=subprocess.DEVNULL,
+                    timeout=3
+                )
+                current_network = {}
+                for line in result.split('\n'):
+                    line = line.strip()
+                    if 'SSID' in line and 'BSSID' not in line:
+                        if current_network:
+                            networks.append(current_network)
+                        ssid = line.split(':', 1)[1].strip()
+                        current_network = {'ssid': ssid, 'bssids': []}
+                    elif 'BSSID' in line:
+                        bssid = line.split(':', 1)[1].strip()
+                        current_network['bssids'].append({'mac': bssid})
+                    elif 'Señal' in line or 'Signal' in line:
+                        try:
+                            signal = int(re.search(r'\d+', line).group())
+                            if current_network['bssids']:
+                                current_network['bssids'][-1]['signal'] = signal
+                        except:
+                            pass
+                    elif 'Canal' in line or 'Channel' in line:
+                        try:
+                            channel = int(re.search(r'\d+', line.split(':')[1]).group())
+                            if current_network['bssids']:
+                                current_network['bssids'][-1]['channel'] = channel
+                        except:
+                            pass
+                
+                if current_network:
+                    networks.append(current_network)
+                    
+            elif self.sistema == "Linux":
+                result = subprocess.check_output(
+                    ['nmcli', '-t', '-f', 'SSID,BSSID,CHAN,SIGNAL', 'dev', 'wifi'],
+                    encoding='utf-8',
+                    stderr=subprocess.DEVNULL,
+                    timeout=3
+                )
+                for line in result.split('\n'):
+                    if line:
+                        parts = line.split(':')
+                        if len(parts) >= 4:
+                            networks.append({
+                                'ssid': parts[0],
+                                'bssids': [{
+                                    'mac': parts[1],
+                                    'channel': int(parts[2]) if parts[2] else 0,
+                                    'signal': int(parts[3]) if parts[3] else -100
+                                }]
+                            })
+            
+            return networks
+        except Exception as e:
+            print(f"Error escaneando redes: {e}")
+            return []
+
+    def get_network_stats(self):
+        """Obtiene estadísticas de red usando psutil"""
+        try:
+            net_io = psutil.net_io_counters()
+            return {
+                'bytes_sent': net_io.bytes_sent,
+                'bytes_recv': net_io.bytes_recv,
+                'packets_sent': net_io.packets_sent,
+                'packets_recv': net_io.packets_recv,
+                'errin': net_io.errin,
+                'errout': net_io.errout,
+                'dropin': net_io.dropin,
+                'dropout': net_io.dropout
+            }
+        except Exception as e:
+            print(f"Error obteniendo estadísticas: {e}")
+            return None
+    
+    # ===== WiFi Methods (del original) =====
     
     def get_wifi_signal(self):
         """Obtiene señal WiFi según el sistema operativo"""
@@ -46,9 +225,10 @@ class SignalMonitor:
             else:
                 return None, None, None
         except Exception as e:
+            self.wifi_errors += 1
             print(f"Error obteniendo WiFi: {e}")
             return None, None, None
-    
+
     def _get_wifi_windows(self):
         """WiFi para Windows - OPTIMIZADO"""
         try:
@@ -74,7 +254,7 @@ class SignalMonitor:
                         continue
                 else:
                     return None, None, None
-            
+
             rssi = None
             ssid = None
             channel = None
@@ -82,12 +262,10 @@ class SignalMonitor:
             for linea in resultado.split('\n'):
                 linea = linea.strip()
                 
-                # SSID
                 if not ssid and 'SSID' in linea and 'BSSID' not in linea:
                     if ':' in linea:
                         ssid = linea.split(':', 1)[1].strip()
                 
-                # RSSI
                 if not rssi and ('rssi' in linea.lower() or 'señal' in linea.lower() or 'signal' in linea.lower()):
                     if ':' in linea:
                         valor = linea.split(':', 1)[1].strip()
@@ -103,7 +281,6 @@ class SignalMonitor:
                             except:
                                 pass
                 
-                # Canal
                 if not channel and ('channel' in linea.lower() or 'canal' in linea.lower()):
                     if ':' in linea:
                         try:
@@ -115,19 +292,18 @@ class SignalMonitor:
                     break
             
             return rssi, ssid, channel
-            
         except Exception as e:
             print(f"Error Windows WiFi: {e}")
             return None, None, None
-    
+
     def _get_wifi_linux(self):
         """WiFi para Linux"""
         try:
-            # Intentar con iwconfig
             resultado = subprocess.check_output(['iwconfig'],
-                                               stderr=subprocess.DEVNULL,
-                                               encoding='utf-8',
-                                               timeout=0.5)
+                stderr=subprocess.DEVNULL,
+                encoding='utf-8',
+                timeout=0.5)
+            
             rssi, ssid, channel = None, None, None
             
             for linea in resultado.split('\n'):
@@ -149,7 +325,6 @@ class SignalMonitor:
             if rssi:
                 return rssi, ssid, channel
             
-            # Fallback a nmcli
             resultado = subprocess.check_output(
                 ['nmcli', '-t', '-f', 'ACTIVE,SSID,SIGNAL,CHAN', 'dev', 'wifi'],
                 encoding='utf-8',
@@ -168,11 +343,10 @@ class SignalMonitor:
                         return rssi, ssid, channel
             
             return None, None, None
-            
         except Exception as e:
             print(f"Error Linux WiFi: {e}")
             return None, None, None
-    
+
     def _get_wifi_macos(self):
         """WiFi para macOS"""
         try:
@@ -195,16 +369,14 @@ class SignalMonitor:
                         channel = int(re.search(r'\d+', linea.split(':')[1]).group())
                     except:
                         pass
-                
                 if rssi and ssid:
                     break
             
             return rssi, ssid, channel
-            
         except Exception as e:
             print(f"Error macOS WiFi: {e}")
             return None, None, None
-    
+
     # ===== Bluetooth Methods =====
     
     def scan_bluetooth(self):
@@ -221,12 +393,11 @@ class SignalMonitor:
         except Exception as e:
             print(f"Error escaneando Bluetooth: {e}")
             return []
-    
+
     def _scan_bluetooth_linux(self):
         """Escaneo Bluetooth en Linux"""
         devices = []
         try:
-            # Escaneo básico con hcitool
             resultado = subprocess.check_output(
                 ['hcitool', 'scan', '--flush'],
                 encoding='utf-8',
@@ -240,7 +411,6 @@ class SignalMonitor:
                     mac = partes[0]
                     nombre = ' '.join(partes[1:]) if len(partes) > 1 else 'Desconocido'
                     
-                    # Intentar obtener RSSI
                     try:
                         rssi_result = subprocess.check_output(
                             ['hcitool', 'rssi', mac],
@@ -260,14 +430,13 @@ class SignalMonitor:
                     })
             
             return devices
-            
         except subprocess.TimeoutExpired:
             print("Timeout en escaneo Bluetooth")
             return []
         except Exception as e:
             print(f"Error Bluetooth Linux: {e}")
             return []
-    
+
     def _scan_bluetooth_macos(self):
         """Escaneo Bluetooth en macOS"""
         devices = []
@@ -295,29 +464,25 @@ class SignalMonitor:
                         current_device['rssi'] = rssi
                     except:
                         current_device['rssi'] = -70
-                    
-                    # Agregar dispositivo
-                    if 'mac' in current_device and 'name' in current_device:
-                        devices.append(current_device.copy())
+                
+                if 'mac' in current_device and 'name' in current_device:
+                    devices.append(current_device.copy())
                     current_device = {}
             
             return devices
-            
         except Exception as e:
             print(f"Error Bluetooth macOS: {e}")
             return []
-    
+
     def _scan_bluetooth_windows(self):
         """Escaneo Bluetooth en Windows"""
         devices = []
         try:
-            # Intentar con PowerShell
             ps_script = """
-            Get-PnpDevice -Class Bluetooth | 
-            Where-Object {$_.Status -eq "OK"} | 
+            Get-PnpDevice -Class Bluetooth |
+            Where-Object {$_.Status -eq "OK"} |
             Select-Object FriendlyName, InstanceId
             """
-            
             resultado = subprocess.check_output(
                 ['powershell', '-Command', ps_script],
                 encoding='utf-8',
@@ -326,18 +491,17 @@ class SignalMonitor:
             )
             
             lines = resultado.strip().split('\n')
-            for i in range(2, len(lines)):  # Skip headers
+            for i in range(2, len(lines)):
                 if lines[i].strip():
                     parts = lines[i].split()
                     if len(parts) >= 2:
                         devices.append({
                             'mac': 'N/A',
                             'name': ' '.join(parts[:-1]),
-                            'rssi': -60 - (i * 5)  # Simulado
+                            'rssi': -60 - (i * 5)
                         })
             
             return devices
-            
         except Exception as e:
             print(f"Error Bluetooth Windows: {e}")
             return []
@@ -354,7 +518,8 @@ def handle_connect():
     emit('status', {
         'connected': True,
         'sistema': sistema,
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'interfaces': monitor.get_network_interfaces()
     })
 
 @socketio.on('disconnect')
@@ -385,6 +550,8 @@ def handle_start_wifi(data):
                             'timestamp': datetime.now().isoformat(),
                             'quality': get_quality(rssi)
                         }
+                        
+                        wifi_history.append(data)
                         socketio.emit('wifi_data', data)
                     else:
                         socketio.emit('wifi_error', {
@@ -393,7 +560,6 @@ def handle_start_wifi(data):
                         })
                     
                     time.sleep(interval)
-                    
                 except Exception as e:
                     print(f"Error en loop WiFi: {e}")
                     socketio.emit('wifi_error', {'error': str(e)})
@@ -401,7 +567,6 @@ def handle_start_wifi(data):
         
         wifi_thread = threading.Thread(target=wifi_monitor_loop, daemon=True)
         wifi_thread.start()
-        
         emit('wifi_started', {'status': 'success'})
     else:
         emit('wifi_started', {'status': 'already_running'})
@@ -427,15 +592,12 @@ def handle_start_bluetooth(data):
             while bt_monitoring:
                 try:
                     devices = monitor.scan_bluetooth()
-                    
                     socketio.emit('bluetooth_data', {
                         'devices': devices,
                         'timestamp': datetime.now().isoformat(),
                         'count': len(devices)
                     })
-                    
                     time.sleep(interval)
-                    
                 except Exception as e:
                     print(f"Error en loop Bluetooth: {e}")
                     socketio.emit('bluetooth_error', {'error': str(e)})
@@ -443,7 +605,6 @@ def handle_start_bluetooth(data):
         
         bt_thread = threading.Thread(target=bt_monitor_loop, daemon=True)
         bt_thread.start()
-        
         emit('bluetooth_started', {'status': 'success'})
     else:
         emit('bluetooth_started', {'status': 'already_running'})
@@ -454,6 +615,52 @@ def handle_stop_bluetooth():
     global bt_monitoring
     bt_monitoring = False
     emit('bluetooth_stopped', {'status': 'success'})
+
+# ===== NUEVOS HANDLERS =====
+
+@socketio.on('scan_networks')
+def handle_scan_networks():
+    """Escanea todas las redes WiFi disponibles"""
+    networks = monitor.scan_wifi_networks()
+    emit('networks_found', {
+        'networks': networks,
+        'count': len(networks),
+        'timestamp': datetime.now().isoformat()
+    })
+
+@socketio.on('get_channel_info')
+def handle_get_channel_info():
+    """Obtiene información del canal actual"""
+    channel_info = monitor.get_channel_info()
+    emit('channel_info', channel_info or {})
+
+@socketio.on('get_network_stats')
+def handle_get_network_stats():
+    """Obtiene estadísticas de red"""
+    stats = monitor.get_network_stats()
+    emit('network_stats', stats or {})
+
+@socketio.on('get_wifi_history')
+def handle_get_wifi_history(data):
+    """Retorna el historial de WiFi"""
+    limit = data.get('limit', 100)
+    history = list(wifi_history)[-limit:]
+    
+    if history:
+        rssi_values = [d['rssi'] for d in history]
+        stats = {
+            'avg': statistics.mean(rssi_values),
+            'min': min(rssi_values),
+            'max': max(rssi_values),
+            'std': statistics.stdev(rssi_values) if len(rssi_values) > 1 else 0
+        }
+    else:
+        stats = {'avg': 0, 'min': 0, 'max': 0, 'std': 0}
+    
+    emit('wifi_history', {
+        'history': history,
+        'stats': stats
+    })
 
 @socketio.on('test_wifi')
 def handle_test_wifi():
@@ -494,6 +701,24 @@ def index():
     """Página principal"""
     return render_template('index.html')
 
+@app.route('/api/system-info')
+def system_info():
+    """Información del sistema"""
+    return jsonify({
+        'sistema': sistema,
+        'interfaces': monitor.get_network_interfaces(),
+        'cpu_percent': psutil.cpu_percent(interval=1),
+        'memory_percent': psutil.virtual_memory().percent,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/wifi-history')
+def get_wifi_history_api():
+    """API REST para historial WiFi"""
+    limit = request.args.get('limit', 100, type=int)
+    history = list(wifi_history)[-limit:]
+    return jsonify({'history': history, 'count': len(history)})
+
 @app.route('/static/<path:path>')
 def send_static(path):
     """Archivos estáticos"""
@@ -503,7 +728,7 @@ def send_static(path):
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("📡 Signal Analyzer Pro - Server")
+    print("📡 Signal Analyzer Pro - Server MEJORADO v2.0")
     print("=" * 60)
     print(f"Sistema: {sistema}")
     print(f"Puerto: 5000")
@@ -518,7 +743,10 @@ if __name__ == '__main__':
     else:
         print("⚠ No se detectó WiFi")
     
+    interfaces = monitor.get_network_interfaces()
+    if interfaces:
+        print(f"✓ Interfaces de red: {', '.join(interfaces)}")
+    
     print()
     
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
-    
